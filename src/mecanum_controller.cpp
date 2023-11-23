@@ -9,15 +9,94 @@
 #include <utility>
 #include <vector>
 
+// /* Begin state transitions */
+// State onEvent(const state::Forward& state, const evt::StopCmdReceived& evt) {
+//   return state::Stop{evt.waitTimeMs};
+// }
+
+// State onEvent(const state::Forward& state, const evt::NoPathFound& evt) {
+//   return state::Stop{DEFAULT_WAIT_TIME_MS};
+// }
+
+// State onEvent(const state::Left& state, const evt::StopCmdReceived& evt) {
+//   return state::Stop{evt.waitTimeMs};
+// }
+
+// State onEvent(const state::Left& state, const evt::NoPathFound& evt) {
+//   return state::Stop{DEFAULT_WAIT_TIME_MS};
+// }
+
+// State onEvent(const state::Right& state, const evt::StopCmdReceived& evt) {
+//   return state::Stop{evt.waitTimeMs};
+// }
+
+// State onEvent(const state::Right& state, const evt::NoPathFound& evt) {
+//   return state::Stop{DEFAULT_WAIT_TIME_MS};
+// }
+
+// State onEvent(const state::Back& state, const evt::StopCmdReceived& evt) {
+//   return state::Stop{evt.waitTimeMs};
+// }
+
+// State onEvent(const state::Back& state, const evt::NoPathFound& evt) {
+//   return state::Stop{DEFAULT_WAIT_TIME_MS};
+// }
+
+// State onEvent(const state::RotateClockwise& state, const evt::StopCmdReceived& evt) {
+//   return state::Stop{evt.waitTimeMs};
+// }
+
+// State onEvent(const state::RotateClockwise& state, const evt::NoPathFound& evt) {
+//   return state::Stop{DEFAULT_WAIT_TIME_MS};
+// }
+
+// State onEvent(const state::RotateCounterClockwise& state, const evt::StopCmdReceived& evt) {
+//   return state::Stop{evt.waitTimeMs};
+// }
+
+// State onEvent(const state::RotateCounterClockwise& state, const evt::NoPathFound& evt) {
+//   return state::Stop{DEFAULT_WAIT_TIME_MS};
+// }
+
+// State onEvent(const state::Stop& state, const evt::StartCmdReceived& evt) {
+//   switch (evt.direction) {
+//     case FWD: {
+//       return state::Forward{evt.distance};
+//     }
+//     case LEFT: {
+//       return state::Left{evt.distance};
+//     }
+//     case RIGHT: {
+//       return state::Right{evt.distance};
+//     }
+//     case BACK: {
+//       return state::Back{evt.distance};
+//     }
+//     default: {
+//       return state::EvaluateEnviroment{};
+//     }
+//   }
+// }
+// /* End state transitions */
+
+// void StateMachine::Enter() {
+//   state = state::EvaluateEnviroment{};
+// }
+
+// void StateMachine::ProcessEvent(const Event& event) {
+//   state = std::visit([](const auto& state, const auto& evt) {
+//       return onEvent(state, evt);
+//   }, state, event);
+// }
+
 MecanumController::MecanumController(ros::NodeHandle nodeHandle) 
   : node(std::move(nodeHandle)),
     odomSub(node.subscribe("/odom", 5, &MecanumController::OdomCb, this)),
     colorSub(node.subscribe("/device_0/sensor_1/Color_0/image/data", 5, &MecanumController::ColorImgCb, this)),
     detPub(node.advertise<sensor_msgs::Image>("/color/detection", 5, false)),
     cmdVelPub(node.advertise<geometry_msgs::Twist>("/cmd_vel", 5, false)),
-    cmdVelPubRate(10),
-    posX{0.0},
-    posY{0.0} {}
+    cmdVelPubRate(10)
+    {}
 
 namespace {
 double CalculateLinearControlInRange(const double diff, const double minSpeed, 
@@ -37,30 +116,11 @@ double CalculateLinearControlInRange(const double diff, const double minSpeed,
 void MecanumController::Run() {
   // TODO: do something more creative
   geometry_msgs::Twist msg;
-  
-  const auto xDiff = targetX - posX;
-  const auto yDiff = targetY - posY;
-  
-  if (xDiff < 0.1 && yDiff < 0.1) {
-    targetAchieved = true;
-    msg.linear.x = 0.0;
-    msg.linear.y = 0.0;
-  }
-  else {
-    msg.linear.x = CalculateLinearControlInRange(xDiff, -1.0, 1.0);
-    msg.linear.y = CalculateLinearControlInRange(yDiff, -1.0, 1.0);
-  }
 
   cmdVelPub.publish(msg);
 
   ros::spinOnce();
   cmdVelPubRate.sleep();
-}
-
-void MecanumController::SetTarget(const double x, const double y) {
-  targetX = x;
-  targetY = y;
-  targetAchieved = false;
 }
 
 void MecanumController::OdomCb(const nav_msgs::Odometry::ConstPtr& msg) {
@@ -74,7 +134,7 @@ void MecanumController::ColorImgCb(const sensor_msgs::ImagePtr& msg) {
   // cv::cvtColor(img->image, background, cv::COLOR_RGB2HSV);
   cv::cvtColor(img->image, background, cv::COLOR_RGB2Lab);
   // cv::blur(background, background, cv::Size(5, 5), cv::Point(-1, -1));
-  cv::GaussianBlur(background, background, cv::Size(5, 5), 1.0, 4.0);
+  cv::GaussianBlur(background, background, cv::Size(3, 3), 1.0, 4.0);
   cv::Mat mask_orange;
   // cv::inRange(background,
   //             cv::Scalar(H_MIN_ORANGE, S_MIN_ORANGE, V_MIN_ORANGE),
@@ -109,7 +169,7 @@ void MecanumController::ColorImgCb(const sensor_msgs::ImagePtr& msg) {
                   cv::Scalar(255, 165, 0), 2, cv::LINE_8, 0);
     cv::putText(img->image, cv::format("Area: %f", area) , cv::Point(bbox.x, bbox.y), 
                 cv::FONT_HERSHEY_DUPLEX, 1.0, CV_RGB(255,255,255), 2);
-  }  
+  }
 
   detPub.publish(img->toImageMsg());
 }

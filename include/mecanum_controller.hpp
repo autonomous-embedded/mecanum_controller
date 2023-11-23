@@ -7,6 +7,110 @@
 #include <sensor_msgs/Image.h>
 
 #include <vector>
+#include <variant>
+
+// #define DEFAULT_WAIT_TIME_MS 5000 // 5 seconds
+
+// namespace state {
+// struct Forward { 
+//   double target_distance;
+// };
+
+// struct Left {
+//   double target_distance;
+// };
+
+// struct Right {
+//   double target_distance;
+// };
+
+// struct Back {
+//   double target_distance;
+// };
+
+// struct RotateClockwise {
+//   double target_angle;
+// };
+
+// struct RotateCounterClockwise {
+//   double target_angle;
+// };
+
+// struct Stop {
+//   double waitTimeMs;
+// };
+
+// struct EvaluateEnviroment {
+
+// };
+
+// } // namespace state
+
+
+// enum Direction {
+//   FWD = 0,
+//   LEFT,
+//   RIGHT,
+//   BACK
+// };
+
+// namespace evt {
+// struct StopCmdReceived {
+//   double waitTimeMs;
+// };
+
+// struct StartCmdReceived { 
+//   Direction direction;
+//   double distance;
+//   double angle;
+// };
+
+// struct NoPathFound {
+// };
+
+// } // namespace evt
+
+// using State = std::variant<state::Forward, state::Left, state::Right, state::Back,
+//                            state::RotateClockwise, state::RotateCounterClockwise,
+//                            state::Stop, state::EvaluateEnviroment>;
+// using Event = std::variant<evt::StopCmdReceived, evt::StartCmdReceived, evt::NoPathFound>;
+
+// /* Begin state transitions */
+// State onEvent(const state::Forward& state, const evt::StopCmdReceived& evt);
+
+// State onEvent(const state::Forward& state, const evt::NoPathFound& evt);
+
+// State onEvent(const state::Left& state, const evt::StopCmdReceived& evt);
+
+// State onEvent(const state::Left& state, const evt::NoPathFound& evt);
+
+// State onEvent(const state::Right& state, const evt::StopCmdReceived& evt);
+
+// State onEvent(const state::Right& state, const evt::NoPathFound& evt);
+
+// State onEvent(const state::Back& state, const evt::StopCmdReceived& evt);
+
+// State onEvent(const state::Back& state, const evt::NoPathFound& evt);
+
+// State onEvent(const state::RotateClockwise& state, const evt::StopCmdReceived& evt);
+
+// State onEvent(const state::RotateClockwise& state, const evt::NoPathFound& evt);
+
+// State onEvent(const state::RotateCounterClockwise& state, const evt::StopCmdReceived& evt);
+
+// State onEvent(const state::RotateCounterClockwise& state, const evt::NoPathFound& evt);
+
+// State onEvent(const state::Stop& state, const evt::StartCmdReceived& evt);
+// /* End state transitions */
+
+// struct StateMachine {
+//  public:
+//   void Enter();
+//   void ProcessEvent(const Event& event);
+
+//  private:
+//   State state;
+// };
 
 class MecanumController {
   static constexpr int H_MIN_ORANGE{0}, S_MIN_ORANGE{100}, V_MIN_ORANGE{50};
@@ -29,22 +133,14 @@ class MecanumController {
   ros::Publisher cmdVelPub;
   ros::Rate cmdVelPubRate;
 
-  // data & stuff -> updated a lot
+  // state
   double posX;
   double posY;
-
-  // setpoint (odometry ctrl)
-  double targetX;
-  double targetY;
-  bool targetAchieved;
 
  public:
   MecanumController(ros::NodeHandle nodeHandle);
 
   void Run();
-
-  void SetTarget(const double x, const double y);
-  bool GetTargetAchieved() const { return targetAchieved; }
 
  private:
   void OdomCb(const nav_msgs::Odometry::ConstPtr& msg);

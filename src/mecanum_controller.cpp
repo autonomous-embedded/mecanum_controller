@@ -114,11 +114,26 @@ double CalculateLinearControlInRange(const double diff, const double minSpeed,
 } // namespace
 
 void MecanumController::Run() {
-  // TODO: do something more creative
   geometry_msgs::Twist msg;
 
-  cmdVelPub.publish(msg);
+  /* Control logic */
 
+  /* Process the obstacle detections into a more useful structure */
+  // const auto& processedObstacles = ProcessObstacles();
+
+  /* Calculate what path we can take */
+  // const auto& path = CalculatePath();
+
+  /* Calculate next control command, either:
+   *  - forward
+   *  - left
+   *  - right
+   *  - stop (if we can't move anywhere)
+   */
+  // msg = GetControlCmd();
+  
+  /* Publish the calculated command */
+  cmdVelPub.publish(msg);
   ros::spinOnce();
   cmdVelPubRate.sleep();
 }
@@ -133,8 +148,7 @@ void MecanumController::ColorImgCb(const sensor_msgs::ImagePtr& msg) {
   cv::Mat background;
   // cv::cvtColor(img->image, background, cv::COLOR_RGB2HSV);
   cv::cvtColor(img->image, background, cv::COLOR_RGB2Lab);
-  // cv::blur(background, background, cv::Size(5, 5), cv::Point(-1, -1));
-  cv::GaussianBlur(background, background, cv::Size(3, 3), 1.0, 4.0);
+  cv::GaussianBlur(background, background, cv::Size(5, 5), 1.0, 6.0);
   cv::Mat mask_orange;
   // cv::inRange(background,
   //             cv::Scalar(H_MIN_ORANGE, S_MIN_ORANGE, V_MIN_ORANGE),
@@ -157,18 +171,34 @@ void MecanumController::ColorImgCb(const sensor_msgs::ImagePtr& msg) {
   std::vector<std::vector<cv::Point>> orange_contours;
   cv::findContours(mask_orange, orange_contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
   // cv::imshow("masko", mask_orange);
-  // cv::imshow("backg", background);
-  // cv::waitKey(1);
-  for (const auto& contour : orange_contours) {
-    const auto area = cv::contourArea(contour);
-    if (area < 5000 or area > 20000) { // TODO: this has to be calibrated
-      continue;
+  cv::imshow("backg", background);
+  cv::waitKey(1);
+
+  {
+    std::unique_lock lk{obstacleMutex};
+    obstacles.clear();
+    cv::Mat bboxMask{background.rows, background.cols, CV_8U};
+    for (const auto& contour : orange_contours) {
+      const auto area = cv::contourArea(contour);
+      if (area < 10000 or area > 40000) { // TODO: this has to be calibrated
+        continue;
+      }
+      auto bbox = cv::boundingRect(contour);
+      obstacles.emplace_back(bbox);
+
+      cv::rectangle(bboxMask, cv::Point(bbox.x, bbox.y), cv::Point(bbox.x + bbox.width, bbox.y + bbox.height), 
+                    cv::Scalar(255), 2, cv::LINE_8, 0);
+      cv::Scalar mean = cv::mean(background, bboxMask);
+      const auto LMean = mean.val[0];
+      const auto aMean = mean.val[1];
+      const auto bMean = mean.val[2];
+
+      cv::rectangle(img->image, cv::Point(bbox.x, bbox.y), cv::Point(bbox.x + bbox.width, bbox.y + bbox.height), 
+                    cv::Scalar(255), 2, cv::LINE_8, 0);
+      cv::putText(img->image, cv::format("Area: %f\n[L,a,b] average: [%lf, %lf, %lf]", 
+                              area, LMean, aMean, bMean),
+                  cv::Point(bbox.x, bbox.y), cv::FONT_HERSHEY_DUPLEX, 1.0, CV_RGB(255,255,255), 2);
     }
-    auto bbox = cv::boundingRect(contour);
-    cv::rectangle(img->image, cv::Point(bbox.x, bbox.y), cv::Point(bbox.x + bbox.width, bbox.y + bbox.height), 
-                  cv::Scalar(255, 165, 0), 2, cv::LINE_8, 0);
-    cv::putText(img->image, cv::format("Area: %f", area) , cv::Point(bbox.x, bbox.y), 
-                cv::FONT_HERSHEY_DUPLEX, 1.0, CV_RGB(255,255,255), 2);
   }
 
   detPub.publish(img->toImageMsg());

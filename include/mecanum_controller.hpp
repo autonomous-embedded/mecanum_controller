@@ -8,6 +8,10 @@
 
 #include <vector>
 #include <variant>
+#include <mutex>
+#include <condition_variable>
+
+#include <opencv2/core/types.hpp>
 
 // #define DEFAULT_WAIT_TIME_MS 5000 // 5 seconds
 
@@ -136,6 +140,10 @@ class MecanumController {
   // state
   double posX;
   double posY;
+
+  std::vector<cv::Rect> obstacles;
+  std::mutex obstacleMutex;
+  // std::obstacleCv;
 
  public:
   MecanumController(ros::NodeHandle nodeHandle);

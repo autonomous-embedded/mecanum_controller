@@ -55,14 +55,10 @@ const char* CtrlCmdMapper(CtrlCmd cmd) {
   return "UNKNOWN";
 }
 
-// struct CtrlParams {
-//   double ro
-// };
-
 MecanumController::MecanumController(ros::NodeHandle nodeHandle) 
   : node(std::move(nodeHandle)),
     odomSub(node.subscribe("/odom", 5, &MecanumController::OdomCb, this)),
-    colorSub(node.subscribe("/device_0/sensor_1/Color_0/image/data", 5, &MecanumController::ColorImgCb, this)),
+    colorSub(node.subscribe("/camera/color/image_raw", 5, &MecanumController::ColorImgCb, this)),
     detPub(node.advertise<sensor_msgs::Image>("/color/detection", 5, false)),
     cmdVelPub(node.advertise<geometry_msgs::Twist>("/cmd_vel", 5, false)),
     cmdVelPubRate(60)
@@ -96,9 +92,9 @@ std::vector<ObstacleDescription> ProcessObstacles(std::vector<cv::Rect> obstacle
 
     /* Add to descriptions */
     ObstacleDescription description;
-    description.distanceEstimation = static_cast<double>((double)area / (double)(720 - yCenter));
-    description.offsetFromCentreX = xCenter - 640;
-    description.offsetFromCentreY = yCenter - 360;
+    description.distanceEstimation = static_cast<double>((double)area / (double)(480 - yCenter));
+    description.offsetFromCentreX = xCenter - 320;
+    description.offsetFromCentreY = yCenter - 240;
     descriptions.push_back(description);
   }
 
@@ -196,8 +192,8 @@ void MecanumController::Run() {
   // ROS_DEBUG_COND(closestObstacle.offsetFromCentreX != 0, "Closest obstacle: %f, %d, %d", 
   //   closestObstacle.distanceEstimation, closestObstacle.offsetFromCentreX, closestObstacle.offsetFromCentreY);
 
-  /* X goes (from -640 to 640), Y goes (from -360 to 360) */
-  if (closestObstacle.offsetFromCentreX >= -200 && closestObstacle.offsetFromCentreX <= 200) {
+  /* X goes (from -320 to 320), Y goes (from -240 to 240) */
+  if (closestObstacle.offsetFromCentreX <= -150 || closestObstacle.offsetFromCentreX >= 150) {
     cmd = CtrlCmd::FORWARD;
   }
   else if (closestObstacle.offsetFromCentreX > 0) {
@@ -209,10 +205,6 @@ void MecanumController::Run() {
   else {
     cmd = CtrlCmd::STOP;
   }
-
-  // if (closestObstacle.distanceEstimation < 100) {
-  //   cmd = CtrlCmd::BACKWARD;
-  // }
 
   msg = GetControlCmd(cmd);
   ROS_DEBUG_THROTTLE(0.1, "Calculated direction: %s", CtrlCmdMapper(cmd));
@@ -229,32 +221,31 @@ void MecanumController::OdomCb(const nav_msgs::Odometry::ConstPtr& msg) {
 }
 
 void MecanumController::ColorImgCb(const sensor_msgs::ImagePtr& msg) {
-  cv_bridge::CvImagePtr img = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::RGB8);
-  ROS_DEBUG_THROTTLE(10, "Image width: %d, image height: %d", img->image.cols, img->image.rows);
+  cv::Mat img = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::RGB8)->image;
+  ROS_DEBUG_THROTTLE(10, "Image width: %d, image height: %d", img.cols, img.rows);
   
   cv::Mat background;
-  cv::cvtColor(img->image, background, cv::COLOR_RGB2Lab);
+  cv::cvtColor(img, background, cv::COLOR_RGB2Lab);
   cv::GaussianBlur(background, background, cv::Size(5, 5), 1.0, 6.0);
   
   cv::Mat mask_orange;
   cv::inRange(background,
               cv::Scalar(L_MIN_ORANGE, A_MIN_ORANGE, B_MIN_ORANGE),
               cv::Scalar(L_MAX_ORANGE, A_MAX_ORANGE, B_MAX_ORANGE),
-              mask_orange);
+              mask_orange);              
   cv::dilate(mask_orange, mask_orange,
              cv::getStructuringElement(cv::MORPH_RECT, cv::Size(5, 5), cv::Point(-1,-1)),
              cv::Point(-1, -1), 3);
-  
+
   std::vector<std::vector<cv::Point>> orange_contours;
   cv::findContours(mask_orange, orange_contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
-  
   {
     std::unique_lock lk{obstacleMutex};
     obstacles.clear();
     cv::Mat bboxMask{background.rows, background.cols, CV_8U};
     for (const auto& contour : orange_contours) {
       const auto area = cv::contourArea(contour);
-      if (area < 10000 or area > 40000) { // TODO: this has to be calibrated
+      if (area < 1000 or area > 10000) { // TODO: this has to be calibrated
         continue;
       }
       auto bbox = cv::boundingRect(contour);
@@ -262,15 +253,16 @@ void MecanumController::ColorImgCb(const sensor_msgs::ImagePtr& msg) {
 #if SEND_IMG_MESSAGES == 1
       cv::rectangle(bboxMask, cv::Point(bbox.x, bbox.y), cv::Point(bbox.x + bbox.width, bbox.y + bbox.height), 
                     cv::Scalar(255), 2, cv::LINE_8, 0);
-      cv::rectangle(img->image, cv::Point(bbox.x, bbox.y), cv::Point(bbox.x + bbox.width, bbox.y + bbox.height), 
+      cv::rectangle(img, cv::Point(bbox.x, bbox.y), cv::Point(bbox.x + bbox.width, bbox.y + bbox.height), 
                     cv::Scalar(255), 2, cv::LINE_8, 0);
-      cv::putText(img->image, cv::format("Area: %.2f\nCoords: [x: %d, y:%d]", area, bbox.x, bbox.y),
+      cv::putText(img, cv::format("Area: %.2f\nCoords: [x: %d, y:%d]", area, bbox.x, bbox.y),
                   cv::Point(bbox.x, bbox.y), cv::FONT_HERSHEY_DUPLEX, 1.0, CV_RGB(255,255,255), 2);
 #endif
     }
   }
 
 #if SEND_IMG_MESSAGES == 1
-  detPub.publish(img->toImageMsg());
+  cv_bridge::CvImage det_img{msg->header, "rgb8", img};
+  detPub.publish(det_img);
 #endif
 }

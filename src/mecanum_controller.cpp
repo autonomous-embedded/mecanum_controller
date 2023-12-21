@@ -69,10 +69,10 @@ double CalculateLinearControlInRange(const double diff, const double minSpeed,
                                      const double maxSpeed) {
   double speed = 0.5 * diff;
 
-  if (diff > maxSpeed) {
+  if (speed > maxSpeed) {
     speed = maxSpeed;
   }
-  else if (diff < minSpeed) {
+  else if (speed < minSpeed) {
     speed = minSpeed;
   }
   return speed;
@@ -105,7 +105,7 @@ geometry_msgs::Twist GetControlCmd(CtrlCmd cmd) {
   geometry_msgs::Twist msg;
   switch (cmd) {
     case CtrlCmd::FORWARD: {
-      msg.linear.x = 0.5;
+      msg.linear.x = CalculateLinearControlInRange(closestObstacle.distanceEstimation, 0.0, 0.5);
       msg.linear.y = 0.0;
       msg.linear.z = 0.0;
       msg.angular.x = 0.0;
@@ -150,7 +150,7 @@ geometry_msgs::Twist GetControlCmd(CtrlCmd cmd) {
       break;
     }
     case CtrlCmd::ROTATE_COUNTER_CLK: {
-      msg.linear.x = 0.5;
+      msg.linear.x = 0.0;
       msg.linear.y = 0.0;
       msg.linear.z = 0.0;
       msg.angular.x = 0.0;
@@ -196,11 +196,17 @@ void MecanumController::Run() {
   if (closestObstacle.offsetFromCentreX <= -150 || closestObstacle.offsetFromCentreX >= 150) {
     cmd = CtrlCmd::FORWARD;
   }
-  else if (closestObstacle.offsetFromCentreX > 0) {
+  else if (closestObstacle.offsetFromCentreX >= 0 && closestObstacle.distanceEstimation <100){
     cmd = CtrlCmd::LEFT;
   }
-  else if (closestObstacle.offsetFromCentreX < 0) {
+  else if (closestObstacle.offsetFromCentreX < 0 && closestObstacle.distanceEstimation <100) {
     cmd = CtrlCmd::RIGHT;
+  }
+  else if (closestObstacle.offsetFromCentreX >= 0 && closestObstacle.distanceEstimation >=100) {
+    cmd = CtrlCmd::ROTATE_COUNTER_CLK;
+  }
+  else if (closestObstacle.offsetFromCentreX < 0 && closestObstacle.distanceEstimation >=100) {
+    cmd = CtrlCmd::ROTATE_CLK;
   }
   else {
     cmd = CtrlCmd::STOP;

@@ -61,7 +61,7 @@ MecanumController::MecanumController(ros::NodeHandle nodeHandle)
     colorSub(node.subscribe("/camera/color/image_raw", 5, &MecanumController::ColorImgCb, this)),
     detPub(node.advertise<sensor_msgs::Image>("/color/detection", 5, false)),
     cmdVelPub(node.advertise<geometry_msgs::Twist>("/cmd_vel", 5, false)),
-    cmdVelPubRate(60)
+    cmdVelPubRate(1.5)
     {}
 
 namespace {

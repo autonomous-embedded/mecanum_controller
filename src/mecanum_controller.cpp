@@ -189,7 +189,8 @@ void MecanumController::Run() {
       closestObstacle = desc;
     }
   }
-  // ROS_DEBUG_COND(closestObstacle.offsetFromCentreX != 0, "Closest obstacle: %f, %d, %d", 
+  //ROS_INFO("Found %d obstacles", processedObstacles.size());
+  //ROS_DEBUG_COND(closestObstacle.offsetFromCentreX != 0, "Closest obstacle: %f, %d, %d", 
   //   closestObstacle.distanceEstimation, closestObstacle.offsetFromCentreX, closestObstacle.offsetFromCentreY);
 
   /* X goes (from -320 to 320), Y goes (from -240 to 240) */

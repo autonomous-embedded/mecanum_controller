@@ -105,7 +105,7 @@ geometry_msgs::Twist GetControlCmd(CtrlCmd cmd) {
   geometry_msgs::Twist msg;
   switch (cmd) {
     case CtrlCmd::FORWARD: {
-      msg.linear.x = 0.5;
+      msg.linear.x = 0.3;
       msg.linear.y = 0.0;
       msg.linear.z = 0.0;
       msg.angular.x = 0.0;
@@ -114,8 +114,8 @@ geometry_msgs::Twist GetControlCmd(CtrlCmd cmd) {
       break;
     }
     case CtrlCmd::LEFT: {
-      msg.linear.x = 0.0;
-      msg.linear.y = -0.5;
+      msg.linear.x = 0.3;
+      msg.linear.y = -0.3;
       msg.linear.z = 0.0;
       msg.angular.x = 0.0;
       msg.angular.y = 0.0;
@@ -123,8 +123,8 @@ geometry_msgs::Twist GetControlCmd(CtrlCmd cmd) {
       break;
     }
     case CtrlCmd::RIGHT: {
-      msg.linear.x = 0.0;
-      msg.linear.y = 0.5;
+      msg.linear.x = 0.3;
+      msg.linear.y = 0.3;
       msg.linear.z = 0.0;
       msg.angular.x = 0.0;
       msg.angular.y = 0.0;
@@ -132,7 +132,7 @@ geometry_msgs::Twist GetControlCmd(CtrlCmd cmd) {
       break;
     }
     case CtrlCmd::BACKWARD: {
-      msg.linear.x = -0.5;
+      msg.linear.x = -0.3;
       msg.linear.y = 0.0;
       msg.linear.z = 0.0;
       msg.angular.x = 0.0;
@@ -245,9 +245,9 @@ void MecanumController::ColorImgCb(const sensor_msgs::ImagePtr& msg) {
     cv::Mat bboxMask{background.rows, background.cols, CV_8U};
     for (const auto& contour : orange_contours) {
       const auto area = cv::contourArea(contour);
-      if (area < 1000 or area > 10000) { // TODO: this has to be calibrated
-        continue;
-      }
+//    if (area < 1000 or area > 10000) { // TODO: this has to be calibrated
+//      continue;
+//    }
       auto bbox = cv::boundingRect(contour);
       obstacles.emplace_back(bbox);
       cv::rectangle(bboxMask, cv::Point(bbox.x, bbox.y), cv::Point(bbox.x + bbox.width, bbox.y + bbox.height), 

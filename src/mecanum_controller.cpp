@@ -59,7 +59,7 @@ MecanumController::MecanumController(ros::NodeHandle nodeHandle)
   : node(std::move(nodeHandle)),
     odomSub(node.subscribe("/odom", 5, &MecanumController::OdomCb, this)),
     colorSub(node.subscribe("/camera/color/image_raw", 5, &MecanumController::ColorImgCb, this)),
-    detPub(node.advertise<sensor_msgs::Image>("/color/detection", 5, false)),
+    detPub(node.advertise<sensor_msgs::Image>("/mecanum_controller/color/detection", 5, false)),
     cmdVelPub(node.advertise<geometry_msgs::Twist>("/cmd_vel", 5, false)),
     cmdVelPubRate(1.5)
     {}
@@ -250,19 +250,15 @@ void MecanumController::ColorImgCb(const sensor_msgs::ImagePtr& msg) {
       }
       auto bbox = cv::boundingRect(contour);
       obstacles.emplace_back(bbox);
-#if SEND_IMG_MESSAGES == 1
       cv::rectangle(bboxMask, cv::Point(bbox.x, bbox.y), cv::Point(bbox.x + bbox.width, bbox.y + bbox.height), 
                     cv::Scalar(255), 2, cv::LINE_8, 0);
       cv::rectangle(img, cv::Point(bbox.x, bbox.y), cv::Point(bbox.x + bbox.width, bbox.y + bbox.height), 
                     cv::Scalar(255), 2, cv::LINE_8, 0);
       cv::putText(img, cv::format("Area: %.2f\nCoords: [x: %d, y:%d]", area, bbox.x, bbox.y),
                   cv::Point(bbox.x, bbox.y), cv::FONT_HERSHEY_DUPLEX, 1.0, CV_RGB(255,255,255), 2);
-#endif
     }
   }
 
-#if SEND_IMG_MESSAGES == 1
   cv_bridge::CvImage det_img{msg->header, "rgb8", img};
   detPub.publish(det_img);
-#endif
 }

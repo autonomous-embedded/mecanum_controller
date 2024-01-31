@@ -6,12 +6,11 @@
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/Image.h>
 
-#include <vector>
-#include <variant>
-#include <mutex>
 #include <condition_variable>
-
+#include <mutex>
 #include <opencv2/core/types.hpp>
+#include <variant>
+#include <vector>
 
 class MecanumController {
   static constexpr int H_MIN_ORANGE{0}, S_MIN_ORANGE{100}, V_MIN_ORANGE{50};
@@ -19,6 +18,8 @@ class MecanumController {
 
   static constexpr int L_MIN_ORANGE{25}, A_MIN_ORANGE{150}, B_MIN_ORANGE{150};
   static constexpr int L_MAX_ORANGE{255}, A_MAX_ORANGE{230}, B_MAX_ORANGE{230};
+
+  static constexpr int IMG_WIDTH{1280}, IMG_HEIGHT{720};
 
   // node handle
   ros::NodeHandle node;
@@ -38,7 +39,7 @@ class MecanumController {
   double posX;
   double posY;
 
-  // dynamic img size 
+  // dynamic img size
   int img_width;
   int img_height;
   std::vector<cv::Rect> obstacles;
@@ -55,4 +56,4 @@ class MecanumController {
   void ColorImgCb(const sensor_msgs::ImagePtr& msg);
 };
 
-#endif // MECANUM_CONTROLLER_HPP_
+#endif  // MECANUM_CONTROLLER_HPP_

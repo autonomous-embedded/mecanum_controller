@@ -189,16 +189,17 @@ const CtrlCmd CalculateControl(const ObstacleDescription& closestObstacle,
   const double xMax = std::max(x1, x2);
   x1 /= xMax;
   x2 /= xMax;
+  ROS_INFO("x1: %lf, x2: %lf", x1, x2);
 
   const double distanceMax = std::max(closestObstacle.distanceEstimation,
                                       secondClosestObstacle.distanceEstimation);
   const double d1 = closestObstacle.distanceEstimation / distanceMax;
   const double d2 = secondClosestObstacle.distanceEstimation / distanceMax;
+  ROS_INFO("d1: %lf, d2: %lf", d1, d2);
 
   /* Calculate weights using distance and x offset */
   const double w1 = x1 * d1;
   const double w2 = x2 * d2;
-
   ROS_INFO("Weight to first: %lf, weight to second: %lf", w1, w2);
 
   /* Condition for stopping the car:
@@ -236,7 +237,7 @@ void MecanumController::Run() {
 
   /* Get message for the calculated direction */
   msg = GetControlCmd(cmd);
-  ROS_DEBUG("Control Command: %s", CtrlCmdStringMapper(cmd));
+  ROS_INFO("Control Command: %s", CtrlCmdStringMapper(cmd));
 
   /* Publish the calculated command */
   cmdVelPub.publish(msg);

@@ -2,8 +2,6 @@
 #define MECANUM_CONTROLLER_HPP_
 
 #include <ros/ros.h>
-// #include <sensor_msgs/Range.h>
-#include <nav_msgs/Odometry.h>
 #include <sensor_msgs/Image.h>
 
 #include <condition_variable>
@@ -35,16 +33,9 @@ class MecanumController {
   ros::Publisher cmdVelPub;
   ros::Rate cmdVelPubRate;
 
-  // state
-  double posX;
-  double posY;
-
-  // dynamic img size
-  int img_width;
-  int img_height;
+  /* vision data */
   std::vector<cv::Rect> obstacles;
   std::mutex obstacleMutex;
-  // std::obstacleCv;
 
  public:
   MecanumController(ros::NodeHandle nodeHandle);
@@ -52,7 +43,6 @@ class MecanumController {
   void Run();
 
  private:
-  void OdomCb(const nav_msgs::Odometry::ConstPtr& msg);
   void ColorImgCb(const sensor_msgs::ImagePtr& msg);
 };
 

@@ -12,6 +12,9 @@
 #define SEND_IMG_MESSAGES 1
 
 struct ObstacleDescription {
+  ObstacleDescription()
+      : distanceEstimation{0.0}, offsetFromCentreX{0}, offsetFromCentreY{0} {}
+
   double distanceEstimation;
   int offsetFromCentreX;
   int offsetFromCentreY;
@@ -172,18 +175,36 @@ const geometry_msgs::Twist GetControlCmd(CtrlCmd cmd) {
   return msg;
 }
 
-const CtrlCmd CalculateControl(const ObstacleDescription& obstacle,
+const CtrlCmd CalculateControl(const ObstacleDescription& closestObstacle,
+                               const ObstacleDescription& secondClosestObstacle,
                                const int imgWidth, const int imgHeight) {
   CtrlCmd cmd{CtrlCmd::STOP};
 
-  if (obstacle.offsetFromCentreX <= -(imgWidth / 4) ||
-      obstacle.offsetFromCentreX >= (imgHeight / 4)) {
-    cmd = CtrlCmd::FORWARD;
-  } else if (obstacle.offsetFromCentreX > 0) {
-    cmd = CtrlCmd::LEFT;
-  } else if (obstacle.offsetFromCentreX < 0) {
-    cmd = CtrlCmd::RIGHT;
-  } else {
+  /* General comment - 1 is closest, 2 is further */
+
+  double x1 = static_cast<double>(closestObstacle.offsetFromCentreX);
+  double x2 = static_cast<double>(secondClosestObstacle.offsetFromCentreX);
+
+  /* Normalize */
+  const double xMax = std::max(x1, x2);
+  x1 /= xMax;
+  x2 /= xMax;
+
+  const double distanceMax = std::max(closestObstacle.distanceEstimation,
+                                      secondClosestObstacle.distanceEstimation);
+  const double d1 = closestObstacle.distanceEstimation / distanceMax;
+  const double d2 = secondClosestObstacle.distanceEstimation / distanceMax;
+
+  /* Calculate weights using distance and x offset */
+  const double w1 = x1 * d1;
+  const double w2 = x2 * d2;
+
+  ROS_INFO("Weight to first: %lf, weight to second: %lf", w1, w2);
+
+  /* Condition for stopping the car:
+   *  - calculated weights both under ??? (todo->value)
+   */
+  if ((w1 < 0.2) && (w2 < 0.2)) {
     cmd = CtrlCmd::STOP;
   }
 
@@ -201,14 +222,17 @@ void MecanumController::Run() {
 
   /* Find obstacle closest to the car */
   ObstacleDescription closestObstacle;
+  ObstacleDescription secondClosestObstacle;
   for (const ObstacleDescription& desc : processedObstacles) {
     if (closestObstacle.distanceEstimation < desc.distanceEstimation) {
+      secondClosestObstacle = closestObstacle;
       closestObstacle = desc;
     }
   }
 
   /* Determine where the car should drive */
-  CtrlCmd cmd{CalculateControl(closestObstacle, IMG_WIDTH, IMG_HEIGHT)};
+  CtrlCmd cmd{CalculateControl(closestObstacle, secondClosestObstacle,
+                               IMG_WIDTH, IMG_HEIGHT)};
 
   /* Get message for the calculated direction */
   msg = GetControlCmd(cmd);

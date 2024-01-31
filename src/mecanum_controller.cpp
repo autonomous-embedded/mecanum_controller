@@ -180,6 +180,12 @@ const CtrlCmd CalculateControl(const ObstacleDescription& closestObstacle,
                                const int imgWidth, const int imgHeight) {
   CtrlCmd cmd{CtrlCmd::STOP};
 
+  /* If closest and second closest are the same, just stop the car */
+  if ((closestObstacle.distanceEstimation == 0.0) &&
+      (secondClosestObstacle.distanceEstimation == 0.0)) {
+    return CtrlCmd::STOP;
+  }
+
   /* General comment - 1 is closest, 2 is further */
   bool isClosestLeft = false;
   if (closestObstacle.offsetFromCentreX <

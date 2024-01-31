@@ -61,7 +61,9 @@ MecanumController::MecanumController(ros::NodeHandle nodeHandle)
     colorSub(node.subscribe("/camera/color/image_raw", 5, &MecanumController::ColorImgCb, this)),
     detPub(node.advertise<sensor_msgs::Image>("/mecanum_controller/color/detection", 5, false)),
     cmdVelPub(node.advertise<geometry_msgs::Twist>("/cmd_vel", 5, false)),
-    cmdVelPubRate(1.5)
+    cmdVelPubRate(1.5),
+    img_width{1280},
+    img_height{720}
     {}
 
 namespace {
@@ -78,7 +80,7 @@ double CalculateLinearControlInRange(const double diff, const double minSpeed,
   return speed;
 }
 
-std::vector<ObstacleDescription> ProcessObstacles(std::vector<cv::Rect> obstacleList) {
+std::vector<ObstacleDescription> ProcessObstacles(std::vector<cv::Rect> obstacleList, int img_width, int img_height) {
   // make sure we pass the vector by value!
   std::vector<ObstacleDescription> descriptions{obstacleList.size()};
 
@@ -92,9 +94,9 @@ std::vector<ObstacleDescription> ProcessObstacles(std::vector<cv::Rect> obstacle
 
     /* Add to descriptions */
     ObstacleDescription description;
-    description.distanceEstimation = static_cast<double>((double)area / (double)(480 - yCenter));
-    description.offsetFromCentreX = xCenter - 320;
-    description.offsetFromCentreY = yCenter - 240;
+    description.distanceEstimation = static_cast<double>((double)area / (double)(img_height - yCenter));
+    description.offsetFromCentreX = xCenter - img_width / 2;
+    description.offsetFromCentreY = yCenter - img_height / 2;
     descriptions.push_back(description);
   }
 
@@ -178,7 +180,7 @@ void MecanumController::Run() {
   /* Control logic */
 
   /* Process the obstacle detections into a more useful structure */
-  const auto& processedObstacles = ProcessObstacles(obstacles);
+  const auto& processedObstacles = ProcessObstacles(obstacles, img_width, img_height);
 
   /* Calculate next control command */
   CtrlCmd cmd{CtrlCmd::STOP};
@@ -189,11 +191,9 @@ void MecanumController::Run() {
       closestObstacle = desc;
     }
   }
-  // ROS_DEBUG_COND(closestObstacle.offsetFromCentreX != 0, "Closest obstacle: %f, %d, %d", 
-  //   closestObstacle.distanceEstimation, closestObstacle.offsetFromCentreX, closestObstacle.offsetFromCentreY);
+  //ROS_INFO("Closest obstacle AREA: %lf OFFSET FROM CENTER X: %d", closestObstacle.distanceEstimation, closestObstacle.offsetFromCentreX);
 
-  /* X goes (from -320 to 320), Y goes (from -240 to 240) */
-  if (closestObstacle.offsetFromCentreX <= -150 || closestObstacle.offsetFromCentreX >= 150) {
+  if (closestObstacle.offsetFromCentreX <= -300 || closestObstacle.offsetFromCentreX  >= 300) {
     cmd = CtrlCmd::FORWARD;
   }
   else if (closestObstacle.offsetFromCentreX > 0) {
@@ -222,8 +222,7 @@ void MecanumController::OdomCb(const nav_msgs::Odometry::ConstPtr& msg) {
 
 void MecanumController::ColorImgCb(const sensor_msgs::ImagePtr& msg) {
   cv::Mat img = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::RGB8)->image;
-  ROS_DEBUG_THROTTLE(10, "Image width: %d, image height: %d", img.cols, img.rows);
-  
+
   cv::Mat background;
   cv::cvtColor(img, background, cv::COLOR_RGB2Lab);
   cv::GaussianBlur(background, background, cv::Size(5, 5), 1.0, 6.0);
@@ -241,6 +240,9 @@ void MecanumController::ColorImgCb(const sensor_msgs::ImagePtr& msg) {
   cv::findContours(mask_orange, orange_contours, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
   {
     std::unique_lock lk{obstacleMutex};
+    img_width = img.cols;
+    img_height = img.rows;
+    ROS_DEBUG_THROTTLE(10, "Image width: %d, image height: %d", img_width, img_height);
     obstacles.clear();
     cv::Mat bboxMask{background.rows, background.cols, CV_8U};
     for (const auto& contour : orange_contours) {

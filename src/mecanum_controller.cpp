@@ -181,6 +181,13 @@ const CtrlCmd CalculateControl(const ObstacleDescription& closestObstacle,
   CtrlCmd cmd{CtrlCmd::STOP};
 
   /* General comment - 1 is closest, 2 is further */
+  bool isClosestLeft = false;
+  if (closestObstacle.offsetFromCentreX <
+      secondClosestObstacle.offsetFromCentreX) {
+    isClosestLeft = true;
+  } else {
+    isClosestLeft = false;
+  }
 
   double x1 = static_cast<double>(closestObstacle.offsetFromCentreX);
   double x2 = static_cast<double>(secondClosestObstacle.offsetFromCentreX);
@@ -202,10 +209,11 @@ const CtrlCmd CalculateControl(const ObstacleDescription& closestObstacle,
   const double w2 = x2 * d2;
   ROS_INFO("Weight to first: %lf, weight to second: %lf", w1, w2);
 
+  const double weigth = (isClosestLeft ? (w1 - w2) : (w2 - w1));
   /* Condition for stopping the car:
    *  - calculated weights both under ??? (todo->value)
    */
-  if ((w1 < 0.2) && (w2 < 0.2)) {
+  if (weigth > 0.0) {
     cmd = CtrlCmd::STOP;
   }
 

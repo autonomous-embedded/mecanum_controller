@@ -23,8 +23,6 @@ class MecanumController {
   ros::NodeHandle node;
 
   // sub
-  ros::Subscriber odomSub;
-  ros::Subscriber depthSub;
   ros::Subscriber colorSub;
 
   // pub, timing

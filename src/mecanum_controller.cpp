@@ -210,6 +210,7 @@ const CtrlCmd CalculateControl(const ObstacleDescription& closestObstacle,
   ROS_INFO("Weight to first: %lf, weight to second: %lf", w1, w2);
 
   const double weigth = (isClosestLeft ? (w1 - w2) : (w2 - w1));
+  ROS_INFO("Final Weight: %lf", weigth);
   /* Condition for stopping the car:
    *  - calculated weights both under ??? (todo->value)
    */

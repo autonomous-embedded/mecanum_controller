@@ -28,7 +28,7 @@ enum CtrlCmd {
   STOP
 };
 
-const char* CtrlCmdMapper(CtrlCmd cmd) {
+const char* CtrlCmdMapper(const CtrlCmd cmd) {
   switch (cmd) {
     case CtrlCmd::FORWARD: {
       return "FORWARD";
@@ -80,7 +80,8 @@ double CalculateLinearControlInRange(const double diff, const double minSpeed,
 }
 
 std::vector<ObstacleDescription> ProcessObstacles(
-    std::vector<cv::Rect> obstacleList, int img_width, int img_height) {
+    const std::vector<cv::Rect> obstacleList, const int img_width,
+    const int img_height) {
   // make sure we pass the vector by value!
   std::vector<ObstacleDescription> descriptions{obstacleList.size()};
 
@@ -104,7 +105,7 @@ std::vector<ObstacleDescription> ProcessObstacles(
   return descriptions;
 }
 
-geometry_msgs::Twist GetControlCmd(CtrlCmd cmd) {
+const geometry_msgs::Twist GetControlCmd(CtrlCmd cmd) {
   geometry_msgs::Twist msg;
   switch (cmd) {
     case CtrlCmd::FORWARD: {

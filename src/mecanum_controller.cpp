@@ -5,7 +5,9 @@
 #include <ros/console.h>
 #include <sensor_msgs/image_encodings.h>
 
+#include <ctime>
 #include <opencv2/opencv.hpp>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -13,11 +15,15 @@
 
 struct ObstacleDescription {
   ObstacleDescription()
-      : distanceEstimation{0.0}, offsetFromCentreX{0}, offsetFromCentreY{0} {}
+      : distanceEstimation{0.0},
+        offsetFromCentreX{0},
+        offsetFromCentreY{0},
+        idx{-1} {}
 
   double distanceEstimation;
   int offsetFromCentreX;
   int offsetFromCentreY;
+  int idx;
 };
 
 enum CtrlCmd {
@@ -59,7 +65,7 @@ const char* CtrlCmdStringMapper(const CtrlCmd cmd) {
 
 MecanumController::MecanumController(ros::NodeHandle nodeHandle)
     : node(std::move(nodeHandle)),
-      colorSub(node.subscribe("/camera/color/image_raw", 5,
+      colorSub(node.subscribe("/camera/color/image_raw", 8,
                               &MecanumController::ColorImgCb, this)),
       detPub(node.advertise<sensor_msgs::Image>(
           "/mecanum_controller/color/detection", 5, false)),
@@ -67,40 +73,36 @@ MecanumController::MecanumController(ros::NodeHandle nodeHandle)
       cmdVelPubRate(4) {}
 
 namespace {
-double CalculateLinearControlInRange(const double diff, const double minSpeed,
-                                     const double maxSpeed) {
-  double speed = 0.5 * diff;
-
-  if (diff > maxSpeed) {
-    speed = maxSpeed;
-  } else if (diff < minSpeed) {
-    speed = minSpeed;
-  }
-
-  return speed;
-}
-
 std::vector<ObstacleDescription> ProcessObstacles(
     const std::vector<cv::Rect> obstacleList, const int imgWidth,
     const int imgHeight) {
   std::vector<ObstacleDescription> descriptions{obstacleList.size()};
 
+  int idx = 0;
   for (const auto& obstacle : obstacleList) {
     /* Calculate center of rectangle */
     const int xCenter = static_cast<int>(obstacle.x + (obstacle.width / 2));
     const int yCenter = static_cast<int>(obstacle.y + (obstacle.height / 2));
 
     /* Calculate area */
-    const double area = obstacle.width * obstacle.height;
+    const double area = (double)obstacle.width * (double)obstacle.height;
 
     /* Add to descriptions */
     ObstacleDescription description;
     description.distanceEstimation =
-        static_cast<double>(area) / static_cast<double>(imgHeight - yCenter);
+        (static_cast<double>(area) - 3'000.0) / 97'000.0;  // ugh...
     description.offsetFromCentreX = xCenter - imgWidth / 2;
     description.offsetFromCentreY = yCenter - imgHeight / 2;
+    description.idx = idx;
     descriptions.push_back(description);
+
+    idx += 1;
   }
+
+  std::sort(std::begin(descriptions), std::end(descriptions),
+            [](const auto& d1, const auto& d2) {
+              return d1.distanceEstimation < d2.distanceEstimation;
+            });
 
   return descriptions;
 }
@@ -150,16 +152,16 @@ const geometry_msgs::Twist GetControlCmd(CtrlCmd cmd) {
       msg.linear.z = 0.0;
       msg.angular.x = 0.0;
       msg.angular.y = 0.0;
-      msg.angular.z = 0.5;
+      msg.angular.z = -0.2;
       break;
     }
     case CtrlCmd::ROTATE_COUNTER_CLK: {
-      msg.linear.x = 0.5;
+      msg.linear.x = 0.0;
       msg.linear.y = 0.0;
       msg.linear.z = 0.0;
       msg.angular.x = 0.0;
       msg.angular.y = 0.0;
-      msg.angular.z = -0.5;
+      msg.angular.z = 0.2;
       break;
     }
     case CtrlCmd::STOP: {
@@ -175,53 +177,148 @@ const geometry_msgs::Twist GetControlCmd(CtrlCmd cmd) {
   return msg;
 }
 
-const CtrlCmd CalculateControl(const ObstacleDescription& closestObstacle,
-                               const ObstacleDescription& secondClosestObstacle,
-                               const int imgWidth, const int imgHeight) {
+static constexpr double FWD_THRESH{0.15};
+static constexpr double BCK_THRESH{0.95};
+
+const CtrlCmd CalculateControlForOneObstacle(
+    const ObstacleDescription& closestObstacle) {
+  static bool rotatingClockwise = false;
   CtrlCmd cmd{CtrlCmd::STOP};
 
-  /* If closest and second closest are the same, just stop the car */
-  if ((closestObstacle.distanceEstimation == 0.0) &&
-      (secondClosestObstacle.distanceEstimation == 0.0)) {
+  /* Stop in front of obstacle if too close */
+  const bool isInFront = std::abs(closestObstacle.offsetFromCentreX) < 50;
+  const bool isTooClose = closestObstacle.distanceEstimation > BCK_THRESH;
+  if (isInFront && isTooClose) {
+    cmd = CtrlCmd::BACKWARD;
+  }
+  /* If stuff is far away, just drive forwards */
+  else if (closestObstacle.distanceEstimation < FWD_THRESH) {
+    cmd = CtrlCmd::FORWARD;
+  }
+  /* Else rotate either left or right, depending on the offset from the center
+   * This has to be implemented to be stateful...*/
+  else {
+    if (rotatingClockwise) {
+      cmd = CtrlCmd::ROTATE_CLK;
+      /* If we see the object at the far left, change the rotation mode to
+       * counterclockwise */
+      if (closestObstacle.offsetFromCentreX < -300) {
+        rotatingClockwise = false;
+      }
+    } else {
+      cmd = CtrlCmd::ROTATE_COUNTER_CLK;
+      /* If we see the object at the far right, change the rotation mode to
+       * clockwise */
+      if (closestObstacle.offsetFromCentreX > 300) {
+        rotatingClockwise = true;
+      }
+    }
+  }
+  ROS_INFO("distance: %.2lf, offset: %d", closestObstacle.distanceEstimation,
+           closestObstacle.offsetFromCentreX);
+
+  return cmd;
+}
+
+const CtrlCmd CalculateControlForTwoObstacles(
+    const ObstacleDescription& closestObstacle,
+    const ObstacleDescription& secondClosestObstacle) {
+  CtrlCmd cmd{CtrlCmd::STOP};
+
+  /* Determine if either is too close */
+  const bool areTooClose =
+      ((closestObstacle.distanceEstimation > BCK_THRESH) ||
+       (secondClosestObstacle.distanceEstimation > BCK_THRESH));
+  if (areTooClose) {
+    cmd = CtrlCmd::BACKWARD;
+  }
+  /* If both are far away, drive forward */
+  else if ((closestObstacle.distanceEstimation) <= FWD_THRESH &&
+           (secondClosestObstacle.distanceEstimation <= FWD_THRESH)) {
+    cmd = CtrlCmd::FORWARD;
+    ROS_INFO("closest dist: %.2lf, second closest: %.2lf",
+             closestObstacle.distanceEstimation,
+             secondClosestObstacle.distanceEstimation);
+  }
+  /* Determine where is the middle between obstacles */
+  else {
+    const ObstacleDescription& leftmost =
+        (closestObstacle.offsetFromCentreX <
+         secondClosestObstacle.offsetFromCentreX)
+            ? closestObstacle
+            : secondClosestObstacle;
+    const ObstacleDescription& rightmost =
+        (closestObstacle.offsetFromCentreX >
+         secondClosestObstacle.offsetFromCentreX)
+            ? closestObstacle
+            : secondClosestObstacle;
+
+    const int midpoint = std::abs(rightmost.offsetFromCentreX) -
+                         std::abs(leftmost.offsetFromCentreX);
+
+    if (rightmost.offsetFromCentreX < -200) {
+      cmd = CtrlCmd::ROTATE_COUNTER_CLK;
+    } else if (leftmost.offsetFromCentreX > 200) {
+      cmd = CtrlCmd::ROTATE_CLK;
+    } else {
+      if (midpoint < -250) {
+        cmd = CtrlCmd::LEFT;
+      } else if (midpoint > 250) {
+        cmd = CtrlCmd::RIGHT;
+      } else {
+        cmd = CtrlCmd::FORWARD;
+      }
+    }
+    ROS_INFO("closest dist: %.2lf, second closest: %.2lf, midpoint: %d",
+             closestObstacle.distanceEstimation,
+             secondClosestObstacle.distanceEstimation, midpoint);
+  }
+
+  return cmd;
+}
+
+const CtrlCmd CalculateControl(
+    const std::optional<ObstacleDescription>& closestObstacleOpt,
+    const std::optional<ObstacleDescription>& secondClosestObstacleOpt,
+    const int imgWidth, const int imgHeight) {
+  CtrlCmd cmd{CtrlCmd::STOP};
+  static bool searching = true;
+
+  if (searching) {
+    searching = true;
+
+    /* none found yet */
+    if ((!closestObstacleOpt.has_value()) &&
+        (!secondClosestObstacleOpt.has_value())) {
+      cmd = CtrlCmd::ROTATE_CLK;
+    } else {
+      searching = false;
+      cmd = CtrlCmd::STOP;
+    }
+
+    return cmd;
+  }
+
+  /* If not searching */
+  if ((!closestObstacleOpt.has_value()) &&
+      (!secondClosestObstacleOpt.has_value())) {
+    /* Maybe we still should... */
+    searching = true;
     return CtrlCmd::STOP;
   }
 
-  /* General comment - 1 is closest, 2 is further */
-  bool isClosestLeft = false;
-  if (closestObstacle.offsetFromCentreX <
-      secondClosestObstacle.offsetFromCentreX) {
-    isClosestLeft = true;
-  } else {
-    isClosestLeft = false;
+  /* Algorithm 1: Only one obstacle is visible or
+   * difference the distance between two obstacles
+   * is too big to be able say that they form a gate */
+  if ((closestObstacleOpt.has_value()) &&
+      ((!secondClosestObstacleOpt.has_value()) ||
+       (secondClosestObstacleOpt.value().distanceEstimation == 0.0))) {
+    cmd = CalculateControlForOneObstacle(closestObstacleOpt.value());
   }
-
-  double x1 = static_cast<double>(closestObstacle.offsetFromCentreX);
-  double x2 = static_cast<double>(secondClosestObstacle.offsetFromCentreX);
-
-  /* Normalize */
-  const double xMax = std::max(x1, x2);
-  x1 /= xMax;
-  x2 /= xMax;
-  ROS_INFO("x1: %lf, x2: %lf", x1, x2);
-
-  const double distanceMax = std::max(closestObstacle.distanceEstimation,
-                                      secondClosestObstacle.distanceEstimation);
-  const double d1 = closestObstacle.distanceEstimation / distanceMax;
-  const double d2 = secondClosestObstacle.distanceEstimation / distanceMax;
-  ROS_INFO("d1: %lf, d2: %lf", d1, d2);
-
-  /* Calculate weights using distance and x offset */
-  const double w1 = x1 * d1;
-  const double w2 = x2 * d2;
-  ROS_INFO("Weight to first: %lf, weight to second: %lf", w1, w2);
-
-  const double weigth = (isClosestLeft ? (w1 - w2) : (w2 - w1));
-  ROS_INFO("Final Weight: %lf", weigth);
-  /* Condition for stopping the car:
-   *  - calculated weights both under ??? (todo->value)
-   */
-  if (weigth > 0.0) {
-    cmd = CtrlCmd::STOP;
+  /* Algorithm 2: Both obstacles visible */
+  else {
+    cmd = CalculateControlForTwoObstacles(closestObstacleOpt.value(),
+                                          secondClosestObstacleOpt.value());
   }
 
   return cmd;
@@ -236,19 +333,18 @@ void MecanumController::Run() {
   const auto processedObstacles =
       ProcessObstacles(obstacles, IMG_WIDTH, IMG_HEIGHT);
 
-  /* Find obstacle closest to the car */
-  ObstacleDescription closestObstacle;
-  ObstacleDescription secondClosestObstacle;
-  for (const ObstacleDescription& desc : processedObstacles) {
-    if (closestObstacle.distanceEstimation < desc.distanceEstimation) {
-      secondClosestObstacle = closestObstacle;
-      closestObstacle = desc;
-    }
-  }
-
   /* Determine where the car should drive */
-  CtrlCmd cmd{CalculateControl(closestObstacle, secondClosestObstacle,
-                               IMG_WIDTH, IMG_HEIGHT)};
+  std::size_t numOfObstacles{processedObstacles.size()};
+  CtrlCmd cmd{CalculateControl(
+      (numOfObstacles > 0
+           ? std::optional<
+                 ObstacleDescription>{processedObstacles[numOfObstacles - 1]}
+           : std::nullopt),
+      (numOfObstacles > 1
+           ? std::optional<
+                 ObstacleDescription>{processedObstacles[numOfObstacles - 2]}
+           : std::nullopt),
+      IMG_WIDTH, IMG_HEIGHT)};
 
   /* Get message for the calculated direction */
   msg = GetControlCmd(cmd);
@@ -261,7 +357,11 @@ void MecanumController::Run() {
   cmdVelPubRate.sleep();
 }
 
+/* CRITICAL SECTION - be quick here...
+ * traces should be left, it's OK to go as slow as 500ms IMO. */
+static time_t currentTime;
 void MecanumController::ColorImgCb(const sensor_msgs::ImagePtr& msg) {
+  std::time(&currentTime);
   cv::Mat img =
       cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::RGB8)->image;
 
@@ -280,7 +380,7 @@ void MecanumController::ColorImgCb(const sensor_msgs::ImagePtr& msg) {
                                        cv::Point(-1, -1)),
              cv::Point(-1, -1), 3);
 
-  // guess something more than zero, so we don't waste time in malloc
+  // Guess something more than zero, so we don't waste time in malloc
   std::vector<std::vector<cv::Point>> orangeContours{5};
   cv::findContours(maskOrange, orangeContours, cv::RETR_TREE,
                    cv::CHAIN_APPROX_SIMPLE);
@@ -290,9 +390,11 @@ void MecanumController::ColorImgCb(const sensor_msgs::ImagePtr& msg) {
     cv::Mat bboxMask{IMG_HEIGHT, IMG_WIDTH, CV_8U};
 
     for (const auto& contour : orangeContours) {
-      const auto area = cv::contourArea(contour);
       const auto bbox = cv::boundingRect(contour);
-      obstacles.emplace_back(bbox);
+      const auto area = bbox.width * bbox.height;
+      if ((area > 3'000) && (area < 100'000)) {
+        obstacles.emplace_back(bbox);
+      }
       cv::rectangle(bboxMask, cv::Point(bbox.x, bbox.y),
                     cv::Point(bbox.x + bbox.width, bbox.y + bbox.height),
                     cv::Scalar(255), 2, cv::LINE_8, 0);
@@ -301,7 +403,7 @@ void MecanumController::ColorImgCb(const sensor_msgs::ImagePtr& msg) {
                     cv::Scalar(255), 2, cv::LINE_8, 0);
       cv::putText(
           img,
-          cv::format("Area: %.2f\nCoords: [x: %d, y:%d]", area, bbox.x, bbox.y),
+          cv::format("Area: %d\nCoords: [x: %d, y:%d]", area, bbox.x, bbox.y),
           cv::Point(bbox.x, bbox.y), cv::FONT_HERSHEY_DUPLEX, 1.0,
           CV_RGB(255, 255, 255), 2);
     }
@@ -309,4 +411,10 @@ void MecanumController::ColorImgCb(const sensor_msgs::ImagePtr& msg) {
 
   const cv_bridge::CvImage detImg{msg->header, "rgb8", img};
   detPub.publish(detImg);
+
+  time_t newTime;
+  std::time(&newTime);
+  ROS_INFO_THROTTLE_NAMED(5, "ImageProcessingTrace",
+                          "MecanumController::ColorImgCb: %.06lf [s]",
+                          std::difftime(newTime, currentTime));
 }
